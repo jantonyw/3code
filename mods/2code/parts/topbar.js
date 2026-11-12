@@ -8,6 +8,8 @@ import { savedProjects, projectName } from "../lib/projects.js";
 import { t } from "../lib/i18n.js";
 import { git, repoOf, here, READ } from "../lib/git.js";
 import { reveal } from "../lib/os.js";
+import { readProjectConfig, readGlobalConfig } from "../lib/config.js";
+import { openTerminal, templateFolder } from "../lib/terminal.js";
 import { icon, stop, find } from "../lib/ui.js";
 
 const PR_EVERY = 60_000;
@@ -81,6 +83,42 @@ export class Topbar {
       .child(child);
   }
 
+  movePanel() {
+    const root = layout();
+    const body = find(root, "work-body");
+    if (!body?.children || body.children.length !== 2) return;
+    const panel = body.children.find((child) => child.id === "panel");
+    const terminal = body.children.find((child) => child.id === "terminal-area");
+    if (!panel || !terminal) return;
+    body.children = body.children[0].id === "panel" ? [terminal, panel] : [panel, terminal];
+    run("layout.set", { layout: root });
+  }
+
+  templates() {
+    const { space, cwd, on } = here();
+    if (cwd) openOverlay({ mod: "2code", kind: "popup", width: 300, height: 360, props: { part: "templates", space: space?.id, cwd, on } });
+  }
+
+  runTemplate(cx) {
+    if (this.runningTemplate) return;
+    const { space, cwd, on } = here();
+    if (!space || !cwd) return;
+    this.runningTemplate = true;
+    cx.spawn(async (cx) => {
+      try {
+        const repo = await repoOf(cwd, on);
+        const project = await readProjectConfig(repo?.main, on);
+        const global = await readGlobalConfig();
+        const template = project.terminal_templates[0] ?? global.terminal_templates[0];
+        if (!template) return this.templates();
+        const scope = project.terminal_templates.length ? "project" : "global";
+        await openTerminal(cx, { space: space.id, name: template.name,
+          folder: templateFolder(template, scope, repo?.top, cwd),
+          commands: [...project.init_script, ...template.commands] });
+      } finally { this.runningTemplate = false; }
+    });
+  }
+
   prChip(pr, th) {
     const state = pr.isDraft && pr.state === "OPEN" ? "draft" : pr.state.toLowerCase();
     const color = state === "open" ? th.ansi2 : state === "merged" ? th.ansi5 : state === "closed" ? th.ansi1 : th.dim;
@@ -128,6 +166,8 @@ export class Topbar {
           .child(icon("git-branch", 14))
           .child(div().text_size(11.5).text_color(th.ansi2).child(`+${stats.add}`))
           .child(div().text_size(11.5).text_color(th.ansi1).child(`-${stats.del}`)))))
+      .child(ghost("move-panel", "columns", t(find(root, "work-body")?.children?.[0]?.id === "panel" ? "panelMoveRight" : "panelMoveLeft"),
+        () => this.movePanel()))
       .child(h_flex().flex_1().min_w(0).justify_center().gap(8).items_center()
         .child(div().id("project-name").font_semibold().text_size(14).text_color(th.foreground).truncate().rounded(5).px(4)
           .when(Boolean(repo && !on), (el) => el.cursor_pointer().hover((s) => s.bg(th.hover)).tooltip(repo.top).on_mouse_down("left", stop).on_click(() => reveal(repo.top)))
@@ -137,6 +177,13 @@ export class Topbar {
             .on_click(() => openOverlay({ mod: "2code", kind: "dialog", width: 520, height: 0.7, props: { part: "branches", root: repo.top, on } })))
           .child(icon("git-branch", 13)).child(div().truncate().child(branch)))))
       .when(Boolean(pr), (el) => el.child(this.prChip(pr, th)))
+      .child(h_flex().h(28).items_center().rounded(6).bg(th.raised)
+        .child(div().id("run-template").size(28).flex().items_center().justify_center().rounded(6).cursor_pointer()
+          .text_color(th.ansi2).hover((s) => s.bg(th.hover)).tooltip(t("runTemplate")).on_mouse_down("left", stop)
+          .on_click((_e, cx) => this.runTemplate(cx)).child(icon("play", 15)))
+        .child(div().id("choose-template").w(24).h(28).flex().items_center().justify_center().rounded(6).cursor_pointer()
+          .text_color(th.muted).hover((s) => s.bg(th.hover).text_color(th.foreground)).tooltip(t("chooseTemplate"))
+          .on_mouse_down("left", stop).on_click(() => this.templates()).child(icon("chevron-down", 13))))
       .when(Boolean(repo && !on), (el) => el.child(ghost("open-in", "external-link", t("openIn"),
         () => openOverlay({ mod: "2code", kind: "popup", width: 220, height: 360, props: { part: "openIn", path: repo.top } }))))
       // As in 2code, the gear is the project's settings (its 2code.json).

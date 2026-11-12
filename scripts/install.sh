@@ -9,7 +9,7 @@ home=${HERDR_APP_HOME:-$HOME/.config/herdr-app}
 
 mkdir -p "$home/layouts" "$home/themes" "$home/mods"
 cp "$here/layouts/2code.json" "$here/layouts/2code.png" "$home/layouts/"
-cp "$here/themes/2code-light.json" "$here/themes/2code-dark.json" "$home/themes/"
+cp "$here/themes/2code-light.json" "$here/themes/2code-dark.json" "$here/themes/vitesse-light.json" "$here/themes/vitesse-dark.json" "$home/themes/"
 
 # Keep the avatar cache across reinstalls.
 cache=""

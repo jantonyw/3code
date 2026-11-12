@@ -47,14 +47,24 @@
           }
         },
         {
-          "id": "projects",
-          "type": "block",
-          "content": {
-            "mod": "2code",
-            "props": {
-              "part": "sidebar"
+          "id": "sidebar-lists",
+          "type": "column",
+          "children": [
+            {
+              "id": "spaces",
+              "type": "block",
+              "size": { "weight": 1 },
+              "min": 90,
+              "content": { "mod": "spaces" }
+            },
+            {
+              "id": "agents",
+              "type": "block",
+              "size": { "weight": 1 },
+              "min": 90,
+              "content": { "mod": "agents" }
             }
-          }
+          ]
         }
       ]
     },

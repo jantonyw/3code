@@ -46,21 +46,46 @@ export async function readChanges(root, on, limit = 1000) {
     const s = conflict ? "U" : renamed ? "R" : xy.includes("D") ? "D" : fresh || xy.includes("A") ? "A" : "M";
     let stat = stats[path] ?? { add: 0, del: 0 };
     if (fresh && !stat.add && files.length < 200) stat = { ...stat, add: countLines(await readTextFile(`${root}/${path}`, { on }).catch(() => "")) };
-    files.push({ path, ...(from ? { from } : {}), status: s, fresh, ...stat });
+    files.push({ path, ...(from ? { from } : {}), status: s, fresh,
+      staged: !fresh && xy[0] !== " " && xy[0] !== "?", unstaged: fresh || (xy[1] !== " " && xy[1] !== "?"), ...stat });
   }
   return { files, hasHead: head.code === 0, limited: entries.filter(Boolean).length > limit };
 }
 
+// Stage or unstage exactly the selected paths, including both sides of renames.
+export async function stageFiles(root, on, files, stage, hasHead) {
+  const paths = [...new Set(files.flatMap((f) => f.from ? [f.from, f.path] : [f.path]))];
+  if (!paths.length) return;
+  const args = stage ? ["add", "-A", "--", ...paths]
+    : hasHead ? ["restore", "--staged", "--", ...paths] : ["rm", "--cached", "-r", "--ignore-unmatch", "--", ...paths];
+  const r = await exec("git", args, { cwd: root, on });
+  if (r.code !== 0) throw new Error((r.stderr || r.stdout).trim());
+}
+
+export async function pull(root, on) {
+  const r = await exec("git", ["pull", "--ff-only"], { cwd: root, on, timeout: 300000 });
+  if (r.code !== 0) throw new Error((r.stderr || r.stdout).trim());
+  return (r.stdout || "").trim();
+}
+
+// Commit the index as it stands. Never add files or replace partially staged
+// content with their working-tree versions.
+export async function commitStaged(root, on, summary, body) {
+  const r = await exec("git", ["commit", "-m", summary, ...(body ? ["-m", body] : [])], { cwd: root, on });
+  if (r.code !== 0) throw new Error((r.stderr || r.stdout).trim());
+}
+
 // A changed file's unified diff lines (from the first hunk), or a note.
-export async function fileDiff(root, on, file, hasHead) {
-  if (file.fresh || (!hasHead && file.status === "A")) {
+export async function fileDiff(root, on, file, hasHead, section = "all") {
+  if (file.fresh || (section === "all" && !hasHead && file.status === "A")) {
     const text = await readTextFile(`${root}/${file.path}`, { on }).catch(() => null);
     if (text === null) return { note: "unreadable" };
     if (text.includes("\0")) return { note: "binary" };
     return { lines: [`@@ -0,0 +1,${countLines(text)} @@`, ...text.slice(0, 400000).replace(/\n$/, "").split("\n").slice(0, 3000).map((l) => `+${l}`)] };
   }
   const paths = file.from ? [file.from, file.path] : [file.path];
-  const r = await exec("git", [...READ, "diff", ...(hasHead ? ["HEAD"] : []), "--find-renames", "--no-ext-diff", "--no-textconv", "--no-color", "--", ...paths], { cwd: root, on });
+  const base = section === "staged" ? ["--cached"] : section === "unstaged" ? [] : hasHead ? ["HEAD"] : [];
+  const r = await exec("git", [...READ, "diff", ...base, "--find-renames", "--no-ext-diff", "--no-textconv", "--no-color", "--", ...paths], { cwd: root, on });
   if (r.code !== 0) throw new Error(r.stderr);
   return hunks(r.stdout, file.binary);
 }
@@ -108,16 +133,6 @@ export function splitRows(rows) {
   }
   flush();
   return out;
-}
-
-// Commits the given files only (all of them: plain add -A + commit).
-export async function commit(root, on, paths, all, summary, body) {
-  const message = ["-m", summary, ...(body ? ["-m", body] : [])];
-  const steps = all ? [["add", "-A"], ["commit", ...message]] : [["add", "-A", "--", ...paths], ["commit", ...message, "--", ...paths]];
-  for (const args of steps) {
-    const r = await exec("git", args, { cwd: root, on });
-    if (r.code !== 0) throw new Error((r.stderr || r.stdout).trim());
-  }
 }
 
 // Throws away a file's changes: back to HEAD, or deleted if git never had it.

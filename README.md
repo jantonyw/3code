@@ -1,141 +1,77 @@
-# 2code
+# 3code
 
-2code's workstation, as a layout for [Herdr](https://herdr.dev).
+3code 是一个基于 [Herdr](https://herdr.dev/) 的开发工作台布局。它把终端、Agent、文件浏览和 Git 操作组合在同一个窗口中，并在原生 Herdr 功能上增加项目模板、文本搜索和 AI 提交说明等能力。
 
-Projects on the left with their worktrees nested under them, a top bar
-with the project, branch and a Files / Git switch, and line-style terminal tabs
-with project and global terminal templates. Herdr runs the terminals and
-agents; 2code is the look and the workflow on top.
+本项目基于此前远程仓库 [AkaraChen/2code](https://github.com/AkaraChen/2code) 的 Herdr 版本修改，保留其 Git 历史，并在此基础上扩展工作台功能。原始基线提交为 [`3be336e`](https://github.com/AkaraChen/2code/commit/3be336e1)。当前仓库不包含旧版 Tauri 桌面应用。
 
-![2code for Herdr](preview.png)
+## 安装
 
-> The original Tauri desktop app lives on the
-> [`legacy-tauri-app`](https://github.com/AkaraChen/2code/tree/legacy-tauri-app)
-> branch and is no longer developed.
-
-## Install
-
-Install [Herdr](https://herdr.dev/download/), then ask the agent in any Herdr
-terminal:
-
-```
-Add the Herdr layout at github.com/AkaraChen/2code
-```
-
-Or copy it yourself from a clone of this repo:
+先安装并启动 [Herdr](https://herdr.dev/download/)，然后在本仓库目录执行：
 
 ```sh
-./scripts/install.sh                         # copies into ~/.config/herdr-app and runs herdr-app check
+./scripts/install.sh
 herdr-app do layout.switch --name 2code
 ```
 
-`ctrl-shift-l` cycles layouts, so Herdr's own stays one key away.
+安装脚本会将布局、mod 和主题复制到 `~/.config/herdr-app`，并执行 `herdr-app check`。当前内部布局与 mod 仍使用 `2code` 标识，因此切换布局时使用上面的名称。再次运行脚本可以更新已安装的文件。
 
-## What it adds to Herdr
+## 功能
 
-- **Projects and worktrees.** Projects stay in the sidebar (only their paths
-  are kept, in Herdr's shared state); a space opened on a new repo adds it.
-  Under each project, its worktrees come from `git worktree list`: the main
-  checkout first, then the others, open or not. Picking a closed one opens it.
-- **Project menu** (right-click): new worktree, rename, project settings,
-  reveal in the file manager, remove. **Worktree menu**: open, reveal, delete.
-- **New worktree** (`+` on a project) opens Herdr's own New worktree dialog and
-  runs the project's `setup_script` as the new space's first tab.
-- **Delete worktree** (`×` on a worktree) warns about uncommitted files and
-  unpushed commits, runs the project's `teardown_script`, then removes the
-  worktree. The branch stays.
-- **Project settings** (the top bar gear): edit `2code.json` scripts and
-  project templates, and the global templates in `~/2code/2code.json`.
-- **Terminal templates**: the menu beside **New Terminal** opens a tab named
-  after the template and types `init_script` and its commands into your shell.
-- **Files**: a tree with file icons, git colors and gitignored entries dimmed,
-  and a right-click menu (new, rename, delete to the trash, copy paths, reveal,
-  open in the default app). Files open in their own tab beside the terminals:
-  an editor with syntax highlighting, save, unsaved prompts, reload on disk
-  changes, markdown preview and images. `cmd-k` finds a file by name.
-- **Changes** in 2code's flat style: commits only the checked files (summary +
-  description), discards a file (click twice) and pushes.
-- **Diff dialog**: Changes and History, unified or split, image before/after,
-  and review comments (click a line, click another to make a range) collected
-  per repo and copied for an agent in one go.
-- **Top bar**: the project opens its folder, the branch opens a branch
-  switcher, the pull request shows with its state (`gh`), "Open in…" your
-  editor, terminal or GitHub Desktop.
-- GitHub avatars for projects, a tile rail when the sidebar is dragged narrow,
-  arrow-key navigation in the sidebar. The corner says Herdr until you hover
-  it, then rolls over to 2code.
-- **English or 简体中文**, from the system's `LC_ALL` / `LC_MESSAGES` / `LANG`;
-  English when none is Chinese or set.
-- 2code's light and dark themes (`2code-light`, `2code-dark`).
+- **工作区与 Agent**：使用 Herdr 原生 Spaces 和 Agents 列表，Agent 可以按工作区分组。列表显示运行中的 Agent，不包含已关闭的聊天历史。
+- **文件与编辑器**：浏览文件树、打开文件标签、编辑和保存文本，支持 Markdown 预览、图片和文件名搜索。
+- **项目文本搜索**：使用 `⌘ Shift F` 搜索已保存的文件内容，显示路径、行号和高亮结果。需要安装 `rg`（ripgrep）；搜索遵循忽略规则，最多显示 200 条结果，跳过超过 1 MB 的文件。点击结果打开文件，暂不自动跳转到匹配行。
+- **Git**：按已暂存和未暂存分组查看文件，通过 `+` / `−` 暂存或取消暂存，查看 diff 和历史。提交使用当前暂存区；拉取使用 `git pull --ff-only`。
+- **Git 操作菜单**：提供抓取、拉取、推送、全部暂存或取消暂存、提交全部、修改或撤销上一次提交，以及常用分支操作。执行结果和错误会显示在菜单中。
+- **AI 提交说明**：在项目设置的 AI 页面填写 OpenAI 兼容的 API 地址、模型、密钥和提交规范提示词，根据已暂存的变更生成可编辑的提交摘要和描述。提交仍需手动确认。
+- **终端模板**：为项目或全局配置命令，从右上角运行按钮或新终端菜单启动。
+- **布局与主题**：文件 / Git 面板可切换到工作区左侧或右侧；提供 2code 和参考 [Vitesse](https://github.com/antfu/vscode-theme-vitesse) 配色的明暗主题。
 
-Everything else (terminals that survive restarts, agent status and alerts,
-worktree creation, settings, remote machines) is Herdr's.
+AI 密钥以明文保存在 Herdr 本机数据目录 `~/.config/herdr-app/data/2code-ai/`，不会保存在项目仓库中。点击生成时，已暂存变更的 diff 会发送到你配置的服务，请留意提交内容中是否包含敏感信息。
 
-## Keys
+## 快捷键
 
-These apply while the 2code layout shows (`keys.json`, section
-`layout:2code`; `install.sh` adds them to yours without replacing keys you
-set). Herdr's own keys keep working: `cmd-w` closes a tab, `cmd-b` the
-sidebar, `cmd-,` settings, `cmd-f` searches a terminal.
+| macOS | Linux / Windows | 功能 |
+| --- | --- | --- |
+| `⌘ T` | `Ctrl Shift T` | 新建终端 |
+| `⌘ K` | `Ctrl Shift K` | 按文件名查找 |
+| `⌘ Shift F` | — | 搜索项目文件内容 |
+| `⌘ S` | `Ctrl S` | 保存当前文件 |
+| `⌘ G` | `Ctrl Shift G` | 打开 diff 窗口 |
+| `⌘ E` | `Ctrl Shift E` | 显示或隐藏文件 / Git 面板 |
 
-| macOS | Linux / Windows | |
-|---|---|---|
-| `cmd-t` | `ctrl-shift-t` | new terminal (runs `init_script`) |
-| `cmd-k` | `ctrl-shift-k` | find a file |
-| `cmd-s` | `ctrl-s` | save the file (in a file tab) |
-| `cmd-g` | `ctrl-shift-g` | diff dialog |
-| `cmd-e` | `ctrl-shift-e` | show / hide the Files / Changes panel |
-| `cmd-shift-e` | `ctrl-shift-j` | arrow keys in the sidebar (Esc returns) |
-| `shift-enter` | `shift-enter` | newline (for agent prompts) |
-| `alt-left` / `alt-right` | `alt-left` / `alt-right` | word left / right |
+快捷键由 `keys.json` 提供；安装脚本只补充尚未设置的绑定，不覆盖你已有的按键设置。
 
-Plain `ctrl-` letters stay with terminal programs on Linux and Windows, so
-2code's `ctrl-k` / `ctrl-g` / `ctrl-e` became `ctrl-shift-` keys there
-(`ctrl-s` only applies in a file tab). Herdr
-treats an edited `keys.json` as yours and stops updating its defaults in it.
+## 项目配置
 
-## `2code.json`
-
-Put it at the root of a project (its main checkout; worktrees use it too):
+在项目主工作区根目录创建 `2code.json`：
 
 ```json
 {
-  "setup_script": ["bun install"],
-  "teardown_script": ["rm -rf node_modules"],
   "init_script": ["nvm use"],
   "terminal_templates": [
-    { "name": "Dev server", "cwd": "apps/web", "commands": ["bun dev"] }
+    { "name": "开发服务器", "cwd": "apps/web", "commands": ["bun dev"] }
   ]
 }
 ```
 
-- `setup_script` / `teardown_script`: one shell line each, run in order with
-  `sh -c` in the worktree, stopping at the first failure.
-- `init_script`: typed into every terminal 2code opens (New Terminal and
-  templates), before a template's own commands.
-- `terminal_templates[].cwd`: relative to the worktree's checkout; empty means
-  its root.
+`init_script` 会在 2code 打开的新终端中先执行；模板的 `cwd` 相对于当前 worktree 根目录。全局终端模板保存在 `~/2code/2code.json`。
 
-Global templates go in `~/2code/2code.json`:
+设置界面仍保留 `setup_script` 和 `teardown_script` 字段，但目前使用 Herdr 原生 worktree 操作时不会自动执行这两个脚本。
 
-```json
-{
-  "terminal_templates": [
-    { "name": "Git log", "commands": ["git log --oneline -20"] }
-  ]
-}
-```
+## 目录
 
-## Repository
+| 路径 | 说明 |
+| --- | --- |
+| `layouts/` | Herdr 工作台布局 |
+| `mods/2code/` | 工作台 mod、界面组件与共享逻辑 |
+| `themes/` | 明暗主题 |
+| `keys.json` | 布局快捷键 |
+| `scripts/install.sh` | 安装与检查脚本 |
+| `RECIPE.md` | 布局与实现说明 |
+| `website/` | 原项目的独立 Next.js 网站 |
 
-| Path | What |
-|---|---|
-| `layouts/2code.json` | the layout |
-| `mods/2code/` | the mod: one folder, parts chosen with `props.part` |
-| `themes/` | `2code-light` and `2code-dark` |
-| `keys.json` | the layout's keys, merged into yours by `install.sh` |
-| `RECIPE.md` | the brief to rebuild the layout from scratch (Herdr's sharing format) |
-| `TODO.md` | what still differs from the Tauri app (中文) |
-| `website/` | [2code's website](https://2code.akr.moe) (Next.js) |
-| `scripts/install.sh` | copy into a Herdr home and check |
-| `scripts/build-file-icons.mjs` | rebuild the file icon slice from material-icon-theme |
+## 致谢与许可
+
+- 项目基于 [AkaraChen/2code](https://github.com/AkaraChen/2code) 的 Herdr 版本。
+- 文件树和 Git 变更面板部分代码源自 Herdr 自带 mod，遵循 Apache-2.0；详细说明见 [NOTICE](mods/2code/NOTICE) 和 [LICENSE-Herdr.txt](mods/2code/LICENSE-Herdr.txt)。
+- 使用的 Lucide 和 Material Icon Theme 图标及其许可证位于 `mods/2code/icons/`。

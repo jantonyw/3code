@@ -18,8 +18,10 @@ import { OpenIn } from "./parts/openIn.js";
 import { EditorPart } from "./parts/editor.js";
 import { FileMenu, FilePrompt, FileDelete, Unsaved } from "./parts/fileMenu.js";
 import { Finder } from "./parts/finder.js";
+import { TextSearch } from "./parts/textSearch.js";
 import { Files } from "./parts/files.js";
 import { Changes } from "./parts/changes.js";
+import { GitActions } from "./parts/gitActions.js";
 
 const PARTS = {
   header: SidebarHeader,
@@ -42,8 +44,10 @@ const PARTS = {
   fileDelete: FileDelete,
   unsaved: Unsaved,
   finder: Finder,
+  textSearch: TextSearch,
   files: Files,
   changes: Changes,
+  gitActions: GitActions,
 };
 
 class Missing {

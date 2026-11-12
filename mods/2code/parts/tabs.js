@@ -13,14 +13,14 @@ import { icon, dot } from "../lib/ui.js";
 import { openDiffDialog } from "./changes.js";
 
 export class Tabs {
-  static COMMANDS = ["newTerminal", "diff", "find"];
+  static COMMANDS = ["newTerminal", "diff", "find", "searchText"];
 
   command(name, cx) {
     if (name === "newTerminal") this.newTerminal(cx);
     if (name === "diff") openDiffDialog();
-    if (name === "find") {
+    if (name === "find" || name === "searchText") {
       const { space, cwd, on } = here();
-      if (cwd) openOverlay({ mod: "2code", kind: "dialog", width: 640, height: 0.6, props: { part: "finder", space: space?.id, cwd, on } });
+      if (cwd) openOverlay({ mod: "2code", kind: "dialog", width: 640, height: 0.6, props: { part: name === "find" ? "finder" : "textSearch", space: space?.id, cwd, on } });
     }
   }
 

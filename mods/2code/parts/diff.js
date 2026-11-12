@@ -1,15 +1,16 @@
 // The diff dialog (Cmd/Ctrl+G or the panel's expand button), like 2code's:
-// Changes (checkboxes, discard, commit, push) and History (commits → files),
+// Changes (discard, commit, push) and History (commits → files),
 // a unified or split diff, image before/after, and review comments: select
 // lines, comment, collect them, copy them for an agent.
 import { div, image } from "gpui-kit";
-import { v_flex, h_flex, InputState, Input, TextareaState, Textarea, Scrollbar, v_virtual_list } from "gpui-base";
+import { v_flex, h_flex, InputState, Input, TextareaState, Textarea, ScrollHandle, Scrollbar, v_virtual_list } from "gpui-base";
 import { props, theme, settings, shared, setShared, appHome, openOverlay, closeOverlay } from "herdr";
 import { t } from "../lib/i18n.js";
 import { git, here } from "../lib/git.js";
-import { readChanges, fileDiff, commitFileDiff, unifiedRows, splitRows, commit, discard, ahead, push, history, commitFiles, isImage, imageVersions, imageSize, fit } from "../lib/changes.js";
+import { readChanges, fileDiff, commitFileDiff, unifiedRows, splitRows, commitStaged, discard, ahead, push, history, commitFiles, isImage, imageVersions, imageSize, fit } from "../lib/changes.js";
 import { icon } from "../lib/ui.js";
-import { badge, checkbox } from "./changes.js";
+import { badge } from "./changes.js";
+import { diffColors } from "../lib/diffColors.js";
 
 const ROW = 20;
 
@@ -28,6 +29,8 @@ export class Diff {
     const { cwd, on } = here();
     this.cwd = cwd; this.on = on;
     this.tab = p.tab === "history" ? "history" : "changes";
+    this.requestedPath = p.path ?? null;
+    this.requestedSection = p.section === "staged" || p.section === "unstaged" ? p.section : "all";
     this.view = localStorage.getItem("view") === "split" ? "split" : "unified";
     this.files = []; this.excluded = new Set(); this.commits = []; this.commit = null; this.commitFiles = [];
     this.file = null; this.rows = []; this.split = []; this.note = null; this.images = null; this.sel = null;
@@ -38,6 +41,11 @@ export class Diff {
     this.body = TextareaState.new({ placeholder: t("descriptionPlaceholder"), rows: 3 });
     this.comment = InputState.new({ placeholder: t("commentPlaceholder") });
     this.comment.on("submit", (_e, cx) => this.addComment(cx));
+    for (const input of [this.summary, this.body, this.comment]) {
+      input.on("focus", () => { this.editing = true; });
+      input.on("blur", () => { this.editing = false; });
+    }
+    this.filesScroll = ScrollHandle.new();
     // Shift-click extends a selection; virtual list clicks carry no modifiers,
     // so the dialog keeps the keyboard and follows Shift itself.
     this.handle = cx.focus_handle();
@@ -60,7 +68,11 @@ export class Diff {
       this.ahead = await ahead(this.root, this.on);
       if (this.tab === "history" && !this.commits.length) this.commits = await history(this.root, this.on);
       if (this.tab === "changes" && this.file && !this.commit && !files.some((f) => f.path === this.file.path)) this.showFile(null);
-      if (this.tab === "changes" && !this.file && files.length) await this.openFile(files[0], cx);
+      if (this.tab === "changes" && !this.file && files.length) {
+        const requested = files.find((f) => f.path === this.requestedPath);
+        await this.openFile(requested ?? files[0], cx, requested ? this.requestedSection : "all");
+        this.requestedPath = null;
+      }
     } catch (e) { this.error = String(e?.message ?? e); }
     cx.notify();
   }
@@ -69,19 +81,20 @@ export class Diff {
     this.file = f; this.rows = []; this.split = []; this.note = null; this.images = null; this.sel = null;
   }
 
-  async openFile(f, cx) {
+  async openFile(f, cx, section = "all") {
     this.showFile(f);
+    this.section = section;
     cx.notify();
     if (!f) return;
     try {
-      if (isImage(f.path) && !this.on) {
+      if (isImage(f.path) && !this.on && section === "all") {
         const cacheRel = "mods/2code/.cache/diff", cacheDir = `${appHome()}/${cacheRel}`;
         this.images = this.commit
           ? await imageVersions(this.root, cacheDir, cacheRel, f, `${this.commit.hash}^`, this.commit.hash)
           : await imageVersions(this.root, cacheDir, cacheRel, f, "HEAD");
         for (const k of ["before", "after"]) if (this.images[k]) this.images[k] = { rel: this.images[k], ...fit(await imageSize(this.images[k]), 360, 220) };
       }
-      const d = this.commit ? await commitFileDiff(this.root, this.on, this.commit.hash, f) : await fileDiff(this.root, this.on, f, this.hasHead);
+      const d = this.commit ? await commitFileDiff(this.root, this.on, this.commit.hash, f) : await fileDiff(this.root, this.on, f, this.hasHead, section);
       if (this.file !== f) return;
       if (d.lines) {
         this.rows = unifiedRows(d.lines).map((r, idx) => ({ ...r, idx }));
@@ -89,6 +102,20 @@ export class Diff {
       } else this.note = t(d.note === "binary" ? "binaryChanged" : d.note === "unreadable" ? "fileUnreadable" : "noTextDiff");
     } catch (e) { this.note = `${t("diffUnreadable")}: ${e?.message ?? e}`; }
     cx.notify();
+  }
+
+  fileKey(e, cx) {
+    if (this.editing || this.busy || (e.key !== "up" && e.key !== "down") || e.modifiers?.shift || e.modifiers?.control || e.modifiers?.alt || e.modifiers?.platform) return;
+    const files = this.tab === "changes" ? this.files : this.commit ? this.commitFiles : [];
+    if (!files.length) return;
+    const current = files.findIndex((f) => f.path === this.file?.path);
+    const next = current < 0 ? 0 : Math.max(0, Math.min(files.length - 1, current + (e.key === "down" ? 1 : -1)));
+    cx.stop_propagation();
+    if (next === current) return;
+    this.filesScroll.scroll_to_item(next);
+    const file = files[next];
+    const section = this.tab === "changes" && this.requestedSection !== "all" && file[this.requestedSection] ? this.requestedSection : "all";
+    cx.spawn(async (cx) => { await this.openFile(file, cx, section); });
   }
 
   setTab(tab, cx) {
@@ -124,11 +151,11 @@ export class Diff {
   }
 
   doCommit(cx) {
-    const summary = this.summary.value().trim(), picked = this.files.filter((f) => !this.excluded.has(f.path));
-    if (!summary || !picked.length) return;
-    const body = this.body.value().trim(), all = picked.length === this.files.length;
+    const summary = this.summary.value().trim();
+    if (!summary || !this.files.some((f) => f.staged)) return;
+    const body = this.body.value().trim();
     this.act(cx, async () => {
-      await commit(this.root, this.on, picked.flatMap((f) => (f.from ? [f.from, f.path] : [f.path])), all, summary, body);
+      await commitStaged(this.root, this.on, summary, body);
       this.summary.set_value(""); this.body.set_value(""); this.excluded = new Set(); this.showFile(null);
     }, "commitFailed");
   }
@@ -185,13 +212,14 @@ export class Diff {
   // ---- drawing ----
 
   lineRow(r, th, selected) {
-    if (r.kind === "@" || r.kind === "") return div().w_full().px(10).h(ROW).flex_none().truncate().bg(th.raised).text_color(th.dim).child(r.text);
+    const colors = diffColors(Boolean(settings().dark));
+    if (r.kind === "@" || r.kind === "") return div().w_full().px(10).h(ROW).flex_none().truncate().bg(colors.hunk).text_color(colors.hunkText).child(r.text);
     return h_flex().w_full().h(ROW).flex_none().gap(8).cursor_pointer()
-      .when(r.kind === "+", (e) => e.bg(th.ansi2 + "18")).when(r.kind === "-", (e) => e.bg(th.ansi1 + "18"))
+      .when(r.kind === "+", (e) => e.bg(colors.add)).when(r.kind === "-", (e) => e.bg(colors.del))
       .when(selected, (e) => e.bg(th.selection))
       .child(div().w(36).flex_none().text_right().text_color(th.dim).child(r.old === undefined ? "" : String(r.old)))
       .child(div().w(36).flex_none().text_right().text_color(th.dim).child(r.new === undefined ? "" : String(r.new)))
-      .child(div().w(10).flex_none().text_color(th.dim).child(r.kind === " " ? "" : r.kind))
+      .child(div().w(10).flex_none().text_color(r.kind === "+" ? colors.addText : r.kind === "-" ? colors.delText : th.dim).child(r.kind === " " ? "" : r.kind))
       .child(div().flex_1().min_w(0).whitespace_nowrap().child(r.text));
   }
 
@@ -199,8 +227,9 @@ export class Diff {
     if (!r) return div().flex_1().min_w(0).h_full().bg(th.raised + "80");
     const num = side === "left" ? r.old : r.new;
     const mark = side === "left" ? r.kind === "-" : r.kind === "+";
+    const colors = diffColors(Boolean(settings().dark));
     return h_flex().flex_1().min_w(0).h_full().gap(8).overflow_hidden().cursor_pointer()
-      .when(mark, (e) => e.bg((side === "left" ? th.ansi1 : th.ansi2) + "18"))
+      .when(mark, (e) => e.bg(side === "left" ? colors.del : colors.add))
       .when(selected, (e) => e.bg(th.selection))
       .child(div().w(36).flex_none().text_right().text_color(th.dim).child(num === undefined ? "" : String(num)))
       .child(div().flex_1().min_w(0).whitespace_nowrap().child(r.text));
@@ -211,6 +240,7 @@ export class Diff {
     const lo = this.sel ? Math.min(this.sel.a, this.sel.b) : -1, hi = this.sel ? Math.max(this.sel.a, this.sel.b) : -2;
     const inSel = (r) => r && r.idx >= lo && r.idx <= hi;
     const font = settings().font_family ?? "JetBrains Mono";
+    const colors = diffColors(Boolean(settings().dark));
     return v_flex().flex_1().min_h(0)
       .when(Boolean(this.images), (el) => el.child(h_flex().p(12).gap(12).items_start().border_b(1).border_color(th.border)
         .children([["before", t("before")], ["after", t("after")]].map(([k, label]) => v_flex().flex_1().min_w(0).gap(6)
@@ -220,7 +250,7 @@ export class Diff {
       .when(!this.note, (el) => el.child(div().flex_1().min_h(0).relative().font_family(font).text_size(12)
         .child(this.view === "split"
           ? v_virtual_list("diff-split", this.split.length, ROW, (i) => `s:${i}`, (range) => this.split.slice(range.start, range.end).map((x) =>
-            x.hunk ? div().w_full().px(10).h(ROW).flex_none().truncate().bg(th.raised).text_color(th.dim).child(x.hunk.text)
+            x.hunk ? div().w_full().px(10).h(ROW).flex_none().truncate().bg(colors.hunk).text_color(colors.hunkText).child(x.hunk.text)
               : h_flex().w_full().h(ROW).flex_none().child(this.splitCell(x.left, "left", th, inSel(x.left))).child(div().w(1).h_full().bg(th.border)).child(this.splitCell(x.right, "right", th, inSel(x.right))))).on_item_click((key, cx) => this.selectKey(key, cx)).absolute().inset_0()
           // Nested flex leaves size_full() with no height here; pin to the box instead.
           : div().id("diff-x").absolute().inset_0().overflow_x_scrollbar().child(div().w_full().min_w(Math.max(400, ...this.rows.map((r) => r.text.length * 7.3 + 120))).h_full()
@@ -243,9 +273,8 @@ export class Diff {
     const parts = f.path.split("/"), name = parts.pop(), active = this.file?.path === f.path, arming = this.confirm === f.path;
     return h_flex().id(`f-${f.path}`).h(30).flex_none().mx(4).px(6).gap(8).items_center().rounded(4).cursor_pointer()
       .bg(active ? th.selected : th.background).hover((s) => s.bg(th.hover))
-      .on_click((_e, cx) => cx.spawn(async (cx) => { await this.openFile(f, cx); }))
+      .on_click((_e, cx) => { this.handle.focus(); cx.spawn(async (cx) => { await this.openFile(f, cx); }); })
       .on_hover((h, cx) => { this.hoverRow = h ? f.path : (this.hoverRow === f.path ? null : this.hoverRow); if (!h && arming) this.confirm = null; cx.notify(); })
-      .when(selectable, (el) => el.child(checkbox(`inc-${f.path}`, !this.excluded.has(f.path), th, (cx) => { if (this.excluded.has(f.path)) this.excluded.delete(f.path); else this.excluded.add(f.path); cx.notify(); })))
       .child(div().flex_none().max_w(170).truncate().text_color(th.foreground).child(name))
       .child(div().flex_1().min_w(0).truncate().text_size(11).text_color(th.dim).child(f.from ? `← ${f.from}` : parts.join("/")))
       .child(div().flex_none().text_size(11).text_color(th.ansi2).child(f.add ? `+${f.add}` : ""))
@@ -258,22 +287,20 @@ export class Diff {
   }
 
   changesList(th) {
-    const picked = this.files.filter((f) => !this.excluded.has(f.path)).length;
-    const all = picked === this.files.length ? true : picked === 0 ? false : "some";
-    const ok = Boolean(this.summary.value().trim() && picked && !this.busy);
+    const stagedCount = this.files.filter((f) => f.staged).length;
+    const ok = Boolean(this.summary.value().trim() && stagedCount && !this.busy);
     const field = (child) => div().w_full().px(10).rounded(6).border_1().border_color(th.input).bg(th.background).on_mouse_down("left", (_e, cx) => cx.stop_propagation()).child(child);
     return v_flex().size_full()
       .child(h_flex().h(36).flex_none().px(10).gap(8).items_center().border_b(1).border_color(th.border)
-        .when(this.files.length > 0, (el) => el.child(checkbox("inc-all", all, th, (cx) => { this.excluded = this.excluded.size ? new Set() : new Set(this.files.map((f) => f.path)); cx.notify(); })))
         .child(div().text_size(12).text_color(th.muted).child(t("changedFiles", { count: this.files.length }))))
-      .child(v_flex().id("dlg-files").flex_1().min_h(0).py(4).overflow_y_scrollbar().children(this.files.map((f) => this.fileRow(f, th, { selectable: true })))
+      .child(v_flex().id("dlg-files").flex_1().min_h(0).py(4).overflow_y_scrollbar().track_scroll(this.filesScroll).children(this.files.map((f) => this.fileRow(f, th, { selectable: true })))
         .when(!this.files.length, (el) => el.child(div().p(10).text_size(12).text_color(th.dim).child(t("noChanges")))))
       .child(v_flex().flex_none().p(10).gap(6).border_t(1).border_color(th.border)
         .child(div().text_size(11).font_semibold().text_color(th.dim).child(t("commitSection").toUpperCase()))
         .child(field(Input.new(this.summary).h(30).text_size(12).text_color(th.foreground)))
         .child(field(Textarea.new(this.body).py(6).text_size(12).text_color(th.foreground)))
         .child(h_flex().gap(8).items_center()
-          .child(div().flex_1().min_w(0).truncate().text_size(11).text_color(th.dim).child(this.files.length ? t("includedCount", { included: picked, total: this.files.length }) : ""))
+          .child(div().flex_1().min_w(0).truncate().text_size(11).text_color(th.dim).child(t("commitStagedCount", { count: stagedCount })))
           .when(this.ahead.count > 0, (el) => el.child(div().id("dlg-push").h(30).px(12).flex().items_center().gap(5).rounded(6).border_1().border_color(th.input).cursor_pointer()
             .text_size(12).hover((s) => s.bg(th.hover)).on_click((_e, cx) => this.doPush(cx)).child(icon("arrow-up", 13)).child(t("pushCount", { count: this.ahead.count }))))
           .child(div().id("dlg-commit").h(30).px(14).flex().items_center().rounded(6).bg(ok ? th.solid : th.raised).text_color(ok ? th.solid_foreground : th.dim).text_size(12)
@@ -286,7 +313,7 @@ export class Diff {
         .child(div().id("back").size(22).flex().items_center().justify_center().rounded(5).cursor_pointer().text_color(th.dim).hover((s) => s.bg(th.hover))
           .on_click((_e, cx) => { this.commit = null; this.commitFiles = []; this.showFile(null); cx.notify(); }).child(icon("chevron-left", 14)))
         .child(div().flex_1().min_w(0).truncate().text_size(12).text_color(th.muted).child(`${this.commit.short} ${this.commit.subject}`)))
-      .child(v_flex().id("dlg-commit-files").flex_1().min_h(0).py(4).overflow_y_scrollbar().children(this.commitFiles.map((f) => this.fileRow(f, th, { selectable: false })))
+      .child(v_flex().id("dlg-commit-files").flex_1().min_h(0).py(4).overflow_y_scrollbar().track_scroll(this.filesScroll).children(this.commitFiles.map((f) => this.fileRow(f, th, { selectable: false })))
         .when(!this.commitFiles.length, (el) => el.child(div().p(10).text_size(12).text_color(th.dim).child(t("noFileChanges")))));
     return v_flex().id("dlg-commits").size_full().py(4).overflow_y_scrollbar()
       .children(this.commits.map((c) => v_flex().id(`c-${c.hash}`).mx(4).px(8).py(6).gap(2).rounded(4).cursor_pointer().hover((s) => s.bg(th.hover))
@@ -305,7 +332,7 @@ export class Diff {
       .on_click(click).when(Boolean(glyph), (e) => e.child(icon(glyph, 13))).child(label);
     const f = this.file;
     return v_flex().id("diff-dialog").size_full().bg(th.popover).text_color(th.foreground).text_size(13)
-      .track_focus(this.handle).on_modifiers_changed((e) => { this.shift = Boolean(e.modifiers?.shift); })
+      .track_focus(this.handle).on_key_down((e, cx) => this.fileKey(e, cx)).on_modifiers_changed((e) => { this.shift = Boolean(e.modifiers?.shift); })
       .child(h_flex().h(46).flex_none().px(14).gap(10).items_center().border_b(1).border_color(th.border)
         .child(icon("git-branch", 14).text_color(th.muted)).child(div().font_semibold().child(this.branch ?? ""))
         .child(h_flex().ml(8).p(3).gap(2).rounded(7).bg(th.raised)

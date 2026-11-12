@@ -7,6 +7,9 @@ diff dialog with history and review comments, and line-style terminal tabs
 with a terminal-template menu. Neutral grays (shadcn style), light and dark,
 English or 简体中文.
 
+Optional `vitesse-light` and `vitesse-dark` themes adapt the colors of
+https://github.com/antfu/vscode-theme-vitesse for Herdr's theme picker.
+
 ![2code](preview.png)
 
 ## What you see
@@ -14,21 +17,18 @@ English or 简体中文.
 Left to right:
 
 - **Sidebar**, 250px (min 44, max 420), `chrome` background.
+  - Below the header, Herdr's native `spaces` and `agents` mods share the
+    sidebar. The former 2code saved-project list is not displayed.
+    The first launch sets the native Agents list to group by space; its sort
+    menu can still change the order. Only live agents appear there.
   - 52px header: Herdr's mark (`frame/welcome/herdr.png`, 20px) and "Herdr"
     (15px semibold) in a 110×24 clipped slot, and a sidebar-toggle icon. Drags
     the window. On macOS (not fullscreen) it starts at 76px, clear of the
     window buttons (`traffic_lights: [16, 19]`: their 14px row is centered on
     the 52px header and top bar); on the macOS rail the row is left to them.
-  - "Projects" label (12px, `dim`) with a `+` that opens the system folder picker.
-  - One 32px row per project: a 20px GitHub avatar (else a rounded letter tile),
-    the name, the most urgent agent dot (only while folded: open, its
-    worktrees show their own), an 18px caret. Under it, one 28px row per
-    worktree (checkout): branch icon, branch name (main checkout first), and
-    an 18px slot with its agent dot, lined up under the caret. Worktrees
-    without an open space are drawn in `dim`.
-  - Footer: Settings (Herdr's settings).
-  - Narrower than 160px: only 24px project tiles with their dots.
 - **Work column**:
+  - The columns button beside the Files / Changes switch moves that panel
+    between the left and right of the terminal area using `layout.set`.
   - 52px top bar (`background`, bottom border; on macOS, when the sidebar is
     hidden or narrower than the window buttons, it pads left to
     `traffic_lights.x + 64` like Herdr's tab bar): a segmented switch (folder =
@@ -115,9 +115,12 @@ Left to right:
 - Finder (`cmd-k` / `ctrl-shift-k`): a dialog over `git ls-files --cached
   --others --exclude-standard` (else `find`), fuzzy-ranked (in order, runs,
   word starts and the file name score; shorter paths win ties), ↑↓ Enter.
-- Changes: click a row shows its diff (again hides it); checkboxes pick what
-  Commit (or Enter in Summary) commits: `git add -A -- <checked>` then
-  `git commit -m summary [-m description] -- <checked>`. The undo icon arms
+- Changes: staged and unstaged files appear in separate groups; the same file
+  may appear in both. The + / − controls stage or unstage a file or group.
+  Clicking a file opens its diff in the large dialog, comparing the index or
+  working tree for its group.
+  Commit (or Enter in Summary) commits the entire index as it stands, without
+  changing partially staged files. The undo icon arms
   ("Discard?"), a second click discards (`git restore --source=HEAD
   --staged --worktree`, or `git clean -f` for new files). Push runs `git push`
   (or `-u origin HEAD` without an upstream).
@@ -125,6 +128,10 @@ Left to right:
   (shift-click too); a comment there goes into shared `2code.review[root]`.
   Review (N) lists them; Copy for Agent writes "Please address these review
   comments:" with each `file:range`, the selected diff and the comment.
+  Up and Down move through the file list and reveal the selected file; text
+  inputs keep their own arrow-key behavior.
+  Added, removed and hunk rows use distinct dark/light diff colors rather than
+  inheriting the terminal's ANSI colors.
 - Branch (top bar): searchable list (current, trunk from `origin/HEAD`,
   "used" when another worktree has it, ↑/↓ counts, remote-only branches);
   Enter or click runs `git switch` (`--track` for remote ones).
@@ -132,12 +139,31 @@ Left to right:
   Terminal opens a tab in the focused folder and types `init_script`. The
   chevron lists project templates and global ones; picking one opens a tab
   named after it in its `cwd` and types `init_script` then its `commands`.
+  The top bar's play button runs the first project template, falling back to
+  the first global template; its adjacent arrow opens the same template menu.
 - Keys (section `layout:2code`): `cmd-t`/`ctrl-shift-t` new terminal,
   `cmd-g`/`ctrl-shift-g` diff dialog, `cmd-e`/`ctrl-shift-e` panel,
   `cmd-k`/`ctrl-shift-k` find a file, `cmd-s`/`ctrl-s` save (in a file tab),
-  `cmd-shift-e`/`ctrl-shift-j` sidebar keyboard (↑↓ move, → open/enter,
-  ← close/parent, Enter opens, Esc back to the terminal), `shift-enter`
+  `cmd-shift-f` searches saved file contents with ripgrep (case-insensitive
+  literal text, respecting ignore rules; first 200 matches, files up to 1 MB).
+  Selecting a match opens the file; the editor does not yet jump to its line.
+  Matches in each result are highlighted using ripgrep's UTF-8 byte ranges.
+  `shift-enter`
   newline, `alt-left/right` word.
+- AI commit drafting reads staged changes and sends up to 30,000 characters
+  of diff to the configured OpenAI-compatible chat-completions endpoint. The
+  global URL, model and plaintext key are stored under Herdr's local
+  `data/2code-ai` directory (owner-only directory on Unix); the user reviews the
+  generated fields before committing.
+  The AI settings include editable commit-message instructions, defaulting to
+  the team's Chinese Conventional Commits convention; the JSON response
+  format remains required.
+- The Changes panel stages or unstages files and groups with + / − controls,
+  and pulls with `git pull --ff-only`. Errors are displayed in the panel.
+  Its `…` menu provides fetch/pull/push, stage/unstage all, commit all, amend,
+  undo the last commit (soft reset), and branch switch,
+  create, merge, rebase, rename and safe deletion; long-running commands stay
+  in the popup until completion, and errors remain visible there.
 - Language: `sh -c 'printf %s "${LC_ALL:-${LC_MESSAGES:-$LANG}}"'` (PowerShell's
   `$env:` on Windows); `zh*` shows 简体中文, anything else English; shared
   `2code.locale` redraws every part.
@@ -146,7 +172,7 @@ Left to right:
 
 - Layout `layouts/2code.json`: root `row` (`titlebar: none`, traffic lights
   `[16, 19]`, theme `{light: 2code-light, dark: 2code-dark}`, JetBrains Mono
-  13, terminal padding `[8, 10]`) → `sidebar` column (`brand`, `projects`
+  13, terminal padding `[8, 10]`) → `sidebar` column (`brand`, native `spaces` and `agents`
   blocks) and `work` column (`topbar` block, `work-body` row → `panel` stack
   [`files`, `changes`] and `terminal-area` column [`tabs` block, `main` tab block]).
 - One mod, `mods/2code`, every block `{mod: "2code", props: {part}}`. Parts:

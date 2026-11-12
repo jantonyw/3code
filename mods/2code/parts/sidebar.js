@@ -6,7 +6,7 @@
 //   closed one opens a space there.
 import { div, image } from "gpui-kit";
 import { v_flex, h_flex } from "gpui-base";
-import { spaces, panes, focused, run, theme, layout, window, pickFolder, openOverlay, shared, notify } from "herdr";
+import { spaces, panes, focused, run, theme, layout, window, pickFolder, openOverlay, shared, setShared, notify } from "herdr";
 import { t, resolveLocale } from "../lib/i18n.js";
 import { readProjectConfig, scriptArgv } from "../lib/config.js";
 import { place, repoOf } from "../lib/git.js";
@@ -21,8 +21,15 @@ const RAIL = 160; // narrower than this, the sidebar draws only project tiles
 // leaving rolls them back. Native transitions, no timers. (`spring` on `top`
 // didn't move here; `transition` does.)
 export class SidebarHeader {
-  init() {
+  init(_props, cx) {
     this.hover = false;
+    // Offer the native grouped view once; subsequent choices in Herdr's sort
+    // menu remain the person's own preference.
+    if (!localStorage.getItem("agents-grouped-default")) {
+      setShared("agents.sort", "grouped");
+      localStorage.setItem("agents-grouped-default", "1");
+    }
+    cx.spawn(async () => { await resolveLocale(); });
   }
 
   layer(id, logo, text, shown, away, th) {

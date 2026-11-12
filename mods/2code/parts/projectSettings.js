@@ -7,6 +7,7 @@ import { props, theme, readTextFile, writeTextFile, exec, window, closeOverlay }
 import { t } from "../lib/i18n.js";
 import { globalConfigPath } from "../lib/config.js";
 import { button, icon } from "../lib/ui.js";
+import { readAI, writeAI } from "../lib/ai.js";
 
 const lines = (text) => text.split("\n").map((l) => l.trim()).filter(Boolean);
 const SCRIPTS = [["setup_script", "setupScript", "setupScriptDesc"], ["teardown_script", "teardownScript", "teardownScriptDesc"], ["init_script", "initScript", "initScriptDesc"]];
@@ -42,6 +43,13 @@ export class ProjectSettings {
         const projectPath = `${p.path}/2code.json`, globalPath = globalConfigPath();
         this.files.project = { path: projectPath, ...(this.remote ? { text: null, data: {} } : await load(projectPath)) };
         this.files.global = { path: globalPath, ...(await load(globalPath)) };
+        const ai = await readAI();
+        this.aiInitial = JSON.stringify(ai);
+        this.aiUrl = InputState.new({ value: ai.url, placeholder: "https://api.openai.com/v1" });
+        this.aiModel = InputState.new({ value: ai.model, placeholder: "gpt-4.1-mini" });
+        this.aiKey = InputState.new({ value: ai.key, placeholder: t("aiKeyPlaceholder") });
+        this.aiKey.set_masked(true);
+        this.aiPrompt = TextareaState.new({ value: ai.prompt, rows: 5 });
         for (const [key] of SCRIPTS) {
           const v = this.files.project.data[key];
           this.scripts[key] = TextareaState.new({ value: Array.isArray(v) ? v.join("\n") : "", rows: 3 });
@@ -50,7 +58,8 @@ export class ProjectSettings {
           const list = this.files[scope].data.terminal_templates;
           this.templates[scope] = (Array.isArray(list) ? list : []).map((x) => this.row(x));
         }
-      } finally { this.loading = false; cx.notify(); }
+      } catch { this.error = t("aiSettingsLoadFailed"); this.loadFailed = true; }
+      finally { this.loading = false; cx.notify(); }
     });
   }
 
@@ -97,6 +106,8 @@ export class ProjectSettings {
         if (!this.files.global.error) {
           await this.write("global", { ...this.files.global.data, terminal_templates: this.templateJson(this.templates.global, false) });
         }
+        const ai = { url: this.aiUrl.value().trim(), model: this.aiModel.value().trim(), key: this.aiKey.value().trim(), prompt: this.aiPrompt.value().trim() };
+        if (JSON.stringify(ai) !== this.aiInitial) await writeAI(ai);
         closeOverlay(props().overlay);
       } catch (e) {
         this.error = t("saveFailed", { error: String(e?.message ?? e) });
@@ -137,9 +148,22 @@ export class ProjectSettings {
     ];
   }
 
+  aiTab(th) {
+    return [
+      div().text_size(12).text_color(th.dim).child(t("aiSettingsDesc")),
+      ...[["aiUrl", this.aiUrl], ["aiModel", this.aiModel], ["aiKey", this.aiKey]].map(([label, state]) => v_flex().gap(5)
+        .child(div().font_semibold().child(t(label)))
+        .child(this.field(th, Input.new(state).h(32).text_size(12).text_color(th.foreground)))),
+      v_flex().gap(5)
+        .child(div().font_semibold().child(t("aiCommitPrompt")))
+        .child(div().text_size(12).text_color(th.dim).child(t("aiCommitPromptDesc")))
+        .child(this.field(th, Textarea.new(this.aiPrompt).py(6).text_size(12).text_color(th.foreground))),
+    ];
+  }
+
   render() {
     const th = theme();
-    const tabs = [["scripts", t("scriptsTab")], ["project", t("projectTemplates")], ["global", t("globalTemplates")]];
+    const tabs = [["scripts", t("scriptsTab")], ["project", t("projectTemplates")], ["global", t("globalTemplates")], ["ai", t("aiSettings")]];
     const errors = ["project", "global"].map((s) => this.files[s]).filter((f) => f?.error).map((f) => t("configInvalid", { path: f.path, error: f.error }));
     return v_flex().size_full().bg(th.popover).text_color(th.foreground).text_size(13)
       .child(h_flex().px(18).pt(16).pb(10).gap(8).items_center()
@@ -152,11 +176,11 @@ export class ProjectSettings {
           .on_click((_e, cx) => { this.tab = id; cx.notify(); }).child(label))))
       .child(v_flex().id("settings-body").flex_1().min_h(0).p(18).gap(14).overflow_y_scrollbar()
         .when(this.loading, (el) => el.child(div().text_color(th.dim).child("…")))
-        .when(!this.loading, (el) => el.children(this.tab === "scripts" ? this.scriptsTab(th) : this.templatesTab(this.tab, th)))
+        .when(!this.loading && !this.loadFailed, (el) => el.children(this.tab === "scripts" ? this.scriptsTab(th) : this.tab === "ai" ? this.aiTab(th) : this.templatesTab(this.tab, th)))
         .children(errors.map((e) => div().text_size(12).text_color(th.ansi1).child(e))))
       .child(h_flex().px(18).py(12).gap(8).items_center().border_t(1).border_color(th.border)
         .child(div().flex_1().min_w(0).truncate().text_size(12).text_color(th.ansi1).child(this.error ?? ""))
         .child(button("cancel", th, t("cancel"), () => closeOverlay(props().overlay)))
-        .child(button("save", th, this.saving ? t("saving") : t("save"), (_e, cx) => this.save(cx), { primary: true, disabled: this.loading || this.saving })));
+        .child(button("save", th, this.saving ? t("saving") : t("save"), (_e, cx) => this.save(cx), { primary: true, disabled: this.loading || this.saving || this.loadFailed })));
   }
 }
